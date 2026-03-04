@@ -464,7 +464,7 @@
 
     instructionBox.textContent = 'انظر إلى شاشة الهاتف بتركيز';
     countdownEl.style.display = 'block';
-    let timeLeft = 7;
+    let timeLeft = 0;
     countdownEl.textContent = '7';
     
     const countdown = setInterval(() => {
@@ -475,7 +475,7 @@
       }
     }, 1000);
 
-    await wait(0);
+    await wait(7000);
     clearInterval(countdown);
 
     if (!cancelled) {
